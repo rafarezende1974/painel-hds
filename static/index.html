@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel de HDs — @ginhocarvalho</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <div class="brand"><div class="brand-mark">💾</div><div><h1>Painel de HDs</h1><p>Seus drives externos, organizados — local e sem nuvem</p></div></div>
+  <nav class="nav" id="nav">
+    <a href="#/visao-geral" data-route="visao-geral">Visão geral</a>
+    <a href="#/explorador" data-route="explorador">Explorador</a>
+    <a href="#/duplicatas" data-route="duplicatas">Duplicatas</a>
+    <a href="#/confirmacao" data-route="confirmacao">Confirmação</a>
+    <a href="#/planejamento" data-route="planejamento">Planejamento</a>
+    <a href="#/como-usar" data-route="como-usar">Como usar</a>
+  </nav>
+</div></header>
+
+<main class="wrap">
+  <div id="server-msg"></div>
+
+  <!-- VISÃO GERAL -->
+  <section id="view-visao-geral" class="view">
+    <div class="card"><div class="row between"><div><h2>Visão geral</h2><p class="muted" style="margin:0">Tudo que já foi catalogado, com o estado atual de cada drive. Nada aqui move ou apaga arquivos.</p></div>
+    <div class="row"><button class="btn" onclick="exportData('inventory','csv')">⬇ Inventário CSV</button><button class="btn" onclick="exportData('inventory','json')">⬇ Inventário JSON</button></div></div></div>
+    <div class="grid g4" id="stats"></div>
+    <div id="overview-empty"></div>
+    <div class="grid g3" id="drive-cards"></div>
+
+    <div class="card">
+      <h2>🔌 Conectar um drive</h2>
+      <p class="muted">Conecte <b>um drive por vez</b>. Clique em <b>Detectar drives</b>, confira se ele aparece com o UUID, e só então clique em <b>Catalogar</b>. O painel reconhece o drive pelo UUID — não pela letra ou pelo nome — então ele continua sendo o mesmo mesmo que a letra mude.</p>
+      <div class="row"><button class="btn primary" onclick="detectDrives()">🔍 Detectar drives</button><span class="small" id="detect-info">Detecção real do sistema operacional (Linux / Windows / macOS).</span></div>
+      <div id="detected" style="margin-top:12px"></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+      <h3>Catalogar uma pasta local</h3>
+      <p class="muted">Útil para testar e para pastas montadas manualmente. Para um HD/SSD, prefira o volume detectado acima (com UUID).</p>
+      <div class="row"><input class="input" id="folder-path" style="flex:2" placeholder="Ex.: /media/ginho/HD-Fotos  ou  /tmp/teste"><input class="input" id="folder-name" style="flex:1" placeholder="Nome no catálogo (opcional)"><button class="btn dark" onclick="catalogFolder()">Catalogar pasta</button></div>
+    </div>
+  </section>
+
+  <!-- EXPLORADOR -->
+  <section id="view-explorador" class="view" hidden>
+    <div class="card">
+      <div class="row between"><div><h2>Explorador</h2><p class="muted" style="margin:0">Navegue pelo inventário — funciona mesmo com o drive desconectado.</p></div>
+      <button class="btn primary" id="btn-rescan" onclick="rescanCurrent()">🔄 Reler este drive</button></div>
+      <div class="row" style="margin-top:12px"><select class="input" id="explorer-drive" style="flex:1" onchange="explorerDriveChanged()"></select>
+      <input class="input" id="global-search" style="flex:2" placeholder="🔎 Buscar em todos os inventários (nome, pasta, etiqueta)…" oninput="globalSearch(this.value)"></div>
+      <div class="crumb" id="breadcrumb" style="margin-top:12px"></div>
+      <div id="scan-progress"></div>
+      <div id="search-results"></div>
+    </div>
+    <div class="card"><h3>🗺️ Mapa de espaço — pastas que mais ocupam</h3><p class="muted">Cada bloco é proporcional ao tamanho. Clique numa pasta para abrir.</p><div class="treemap" id="treemap"></div></div>
+    <div class="card"><h3>Arquivos e pastas</h3><div id="file-list"></div></div>
+  </section>
+
+  <!-- DUPLICATAS -->
+  <section id="view-duplicatas" class="view" hidden>
+    <div class="card"><h2>Possíveis duplicatas</h2>
+      <p class="muted">Candidatos por <b>nome + tamanho iguais</b>. Isso é um indício, <b>não uma prova</b> — dois arquivos podem ter o mesmo nome e tamanho e ter conteúdo diferente. A confirmação é na aba <a href="#/confirmacao">Confirmação</a>.</p>
+      <div class="row"><input class="input" id="dup-search" style="flex:1" placeholder="Buscar por arquivo, pasta ou etiqueta…" oninput="loadDuplicates()"><button class="btn" onclick="exportData('duplicates','csv')">⬇ Exportar CSV</button><button class="btn" onclick="exportData('duplicates','json')">⬇ Exportar JSON</button></div>
+      <div id="dup-pairs" style="margin-top:12px"></div>
+    </div>
+    <div id="dup-total"></div>
+    <div id="dup-list"></div>
+  </section>
+
+  <!-- CONFIRMAÇÃO -->
+  <section id="view-confirmacao" class="view" hidden>
+    <div class="card"><h2>Confirmação por conteúdo (SHA-256)</h2>
+      <div class="notice"><b>Candidato ≠ confirmado.</b> Nome e tamanho iguais não comprovam conteúdo igual. Só a leitura integral com SHA-256 confirma. A verificação compara primeiro os arquivos com <b>tamanhos repetidos — mesmo com nomes diferentes</b> — e nunca começa sozinha uma leitura de vários terabytes: você vê o tamanho total da fila e decide.</div>
+      <div id="verify-info"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="btn-verify-start" onclick="verifyStart()">▶ Iniciar verificação</button>
+        <button class="btn" onclick="verifyPause()">⏸ Pausar</button>
+        <button class="btn" onclick="verifyResume()">▶ Retomar</button>
+        <button class="btn danger" onclick="verifyCancel()">■ Interromper</button>
+        <button class="btn" onclick="exportData('verified','csv')">⬇ Confirmadas (CSV)</button>
+      </div>
+      <div id="verify-progress" style="margin-top:12px"></div>
+    </div>
+    <div class="card"><h3>✅ Duplicatas confirmadas por SHA-256</h3><p class="muted">Mesmo conteúdo, mesmo tamanho, mesmo hash. A economia aqui também é <b>potencial</b>: manter uma cópia é uma decisão sua, o painel não apaga nada.</p><div id="confirmed-list"></div></div>
+    <div class="card"><h3>🕒 Candidatos aguardando confirmação</h3><p class="muted">Grupos por nome + tamanho que ainda não passaram pela leitura integral.</p><div id="pending-list"></div></div>
+  </section>
+
+  <!-- PLANEJAMENTO -->
+  <section id="view-planejamento" class="view" hidden>
+    <div class="card"><h2>Planejamento de espaço</h2>
+      <p class="muted">Simulação para liberar um drive. <b>Nada é movido nem apagado.</b> Pastas e projetos ficam juntos (não dividimos uma pasta no meio). Candidatos a duplicata <b>não</b> são descontados como economia confirmada.</p>
+      <div class="grid g2">
+        <div><label>Drive para liberar</label><select class="input" id="plan-source"></select></div>
+        <div><label>Margem de espaço livre a manter em cada destino: <b id="margin-label">10%</b></label><input type="range" min="0" max="30" value="10" id="plan-margin" style="width:100%" oninput="document.getElementById('margin-label').textContent=this.value+'%'"></div>
+      </div>
+      <div class="row" style="margin-top:14px"><button class="btn primary" onclick="runPlan()">🧮 Simular distribuição</button><span class="small">Prioriza os drives maiores como destino.</span></div>
+      <div id="plan-result" style="margin-top:14px"></div>
+    </div>
+  </section>
+
+  <!-- COMO USAR -->
+  <section id="view-como-usar" class="view" hidden>
+    <div class="card"><h2>Como usar — passo a passo para iniciantes</h2><p class="muted">Tudo aqui funciona no seu computador, sem depender do chat e sem internet. O catálogo fica salvo num banco local (SQLite) na pasta do aplicativo — fora dos drives analisados.</p></div>
+    <div class="steps">
+      <div class="step"><b class="num">1</b><h3>Começar</h3><p class="small">Abra o painel com o atalho <b>iniciar-painel</b>. Se o servidor estiver desligado, rode o atalho de novo — ele liga sozinho. Se já estiver ligado, ele só abre a janela, sem criar outro servidor. O endereço é <span class="mono">http://127.0.0.1:8765</span> — só no seu computador, não é publicado na internet.</p><a class="btn sm" href="#/visao-geral">Abrir Visão geral →</a></div>
+      <div class="step"><b class="num">2</b><h3>Catalogar os drives</h3><p class="small">Conecte <b>um HD/SSD por vez</b> → <b>Detectar drives</b> → <b>Catalogar</b> → <b>Fazer inventário</b>. Acompanhe o progresso; quando aparecer “Leitura concluída”, aí sim ejete o drive pelo sistema. Depois repita com o próximo. Dê uma etiqueta física (ex.: HD-01) e edite nome/finalidade — isso muda só o catálogo, nunca o volume.</p><a class="btn sm" href="#/visao-geral">Conectar drive →</a></div>
+      <div class="step"><b class="num">3</b><h3>Encontrar arquivos</h3><p class="small">No Explorador, navegue por drive e pasta e veja o mapa de espaço. A busca global acha arquivos <b>mesmo com o drive desconectado</b> — o catálogo fica salvo. Para abrir o arquivo de verdade, reconecte o drive. Use <b>Reler este drive</b> para atualizar depois de mudanças.</p><a class="btn sm" href="#/explorador">Abrir Explorador →</a></div>
+      <div class="step"><b class="num">4</b><h3>Conferir duplicatas</h3><p class="small"><b>Candidato</b> = mesmo nome e tamanho (indício). <b>Confirmado</b> = mesmo SHA-256 após leitura integral (prova). Os grupos são ordenados pela <b>maior economia potencial</b>. A verificação pode ser pausada e retomada, e detecta arquivo alterado ou drive desconectado no meio do caminho. Leituras completas podem demorar — é normal.</p><a class="btn sm" href="#/duplicatas">Ver duplicatas →</a></div>
+      <div class="step"><b class="num">5</b><h3>Planejar a organização</h3><p class="small">Escolha o drive para liberar, ajuste a margem de espaço livre e simule. O painel mostra onde cada pasta caberia e a ocupação prevista. É só uma simulação: <b>nada é movido</b> — você decide e faz a cópia manualmente, com calma.</p><a class="btn sm" href="#/planejamento">Planejar →</a></div>
+    </div>
+    <div class="card"><h3>❓ Perguntas frequentes</h3>
+      <details><summary>Drive não aparece</summary><p class="small">Confira se ele aparece no gerenciador de arquivos do sistema e se está montado. Desconecte, espere 10 segundos e conecte de novo, de preferência direto na porta (sem hub). Clique em <b>Detectar drives</b> novamente. No Linux, drives aparecem em <span class="mono">/media/</span> ou <span class="mono">/mnt/</span>.</p></details>
+      <details><summary>Tipo não identificado</summary><p class="small">O painel só diz HD ou SSD quando há informação confiável do sistema. Se aparecer “Tipo não identificado”, não é erro: o sistema não informou o tipo com segurança. O inventário funciona do mesmo jeito.</p></details>
+      <details><summary>Leitura interrompida</summary><p class="small">Se a leitura parar (drive desconectado, energia, cancelamento), o <b>último inventário válido continua disponível</b> para pesquisa. Reconecte o drive correto e clique em <b>Reler este drive</b> — etiquetas e histórico são preservados.</p></details>
+      <details><summary>Painel não abre</summary><p class="small">Rode o atalho <b>iniciar-painel</b> de novo. Se a porta já estiver em uso, é porque o painel já está rodando — abra <span class="mono">http://127.0.0.1:8765</span> no navegador. Para encerrar, feche o terminal do painel (Ctrl+C) — o catálogo fica salvo.</p></details>
+      <details><summary>A data do arquivo prova quando usei o drive?</summary><p class="small">Não. A data mostrada é a <b>última modificação do arquivo</b>, não a última vez que o drive foi usado. A data que vale para o inventário é a <b>“Última atualização”</b> de cada drive, no cartão dele.</p></details>
+      <details><summary>O painel apaga ou move meus arquivos?</summary><p class="small">Não. Nesta versão os drives são tratados <b>somente como leitura</b>. O planejamento é simulação e a confirmação só lê os arquivos para calcular o hash.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer class="site"><a href="https://www.instagram.com/ginhocarvalho/" target="_blank" rel="noopener">Idealizado por @ginhocarvalho</a> · Painel local — seus arquivos não saem do seu computador</footer>
+
+<div class="modal-back" id="modal"><div class="modal">
+  <h3 id="modal-title" style="margin-top:0">Editar drive</h3>
+  <p class="small">A edição altera <b>apenas o catálogo</b>. Não renomeia o volume nem modifica arquivos.</p>
+  <label>Nome no catálogo</label><input class="input" id="edit-name">
+  <label>Etiqueta física (ex.: HD-01)</label><input class="input" id="edit-label" placeholder="HD-01">
+  <label>Finalidade</label><input class="input" id="edit-purpose" placeholder="Ex.: Fotos de casamento, backup 2024…">
+  <label>Localização</label><input class="input" id="edit-location" placeholder="Ex.: Gaveta do escritório, prateleira 2…">
+  <div class="row" style="margin-top:14px"><button class="btn primary" onclick="saveEdit()">Salvar</button><button class="btn" onclick="closeModal()">Cancelar</button></div>
+</div></div>
+<div class="toast" id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

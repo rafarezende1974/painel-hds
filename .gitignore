@@ -1,0 +1,7 @@
+# Catálogo local (cada usuário tem o seu) e saídas de build
+data/
+dist/
+build/
+__pycache__/
+*.spec
+*.log
