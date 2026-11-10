@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 PORT = 8765
 HOST = "127.0.0.1"
 # Caminhos: funcionam como script .py e como .exe congelado (PyInstaller).
@@ -358,13 +358,18 @@ def _scan_worker(drive_id, scan_id, mountpoint):
     errors = []
     warnings = []
     seen_inodes = {}
-    files = dirs = total_b = 0
+    files = dirs = total_b = seen = 0
     batch = []
+    # O check de "não atravessar para outro volume" usa st_dev, que só é confiável
+    # em POSIX (Linux/macOS). No Windows ele não distingue volumes de forma segura
+    # e já fez uma leitura inteira voltar vazia num HD real — por isso, no Windows
+    # o check fica desligado (as letras de unidade já delimitam os volumes).
     root_dev = None
-    try:
-        root_dev = os.stat(mountpoint).st_dev
-    except Exception:
-        pass
+    if os.name == "posix":
+        try:
+            root_dev = os.stat(mountpoint).st_dev
+        except Exception:
+            pass
     c = db()
     try:
         stack = [(mountpoint, "")]
@@ -381,6 +386,7 @@ def _scan_worker(drive_id, scan_id, mountpoint):
             for e in entries:
                 if scan_cancel.get(scan_id):
                     raise InterruptedError("interrompido pelo usuário")
+                seen += 1
                 try:
                     rel = (rel_dir + "/" + e.name).strip("/") if rel_dir else e.name
                     scan_state[scan_id]["current_path"] = rel
@@ -439,21 +445,39 @@ def _scan_worker(drive_id, scan_id, mountpoint):
                 "INSERT INTO entries(drive_id,scan_id,rel_path,parent_path,name,is_dir,size,mtime,inode,nlink,is_symlink,is_hardlink_copy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 batch)
             c.commit()
-        # conclusão: só agora o novo inventário vira o atual
-        c.execute("UPDATE scans SET finished_at=?, status='completed', files_count=?, dirs_count=?, total_files_bytes=?, errors_json=?, warnings_json=?, incomplete=? WHERE id=?",
-                  (now_iso(), files, dirs, total_b, json.dumps(errors, ensure_ascii=False),
-                   json.dumps(warnings, ensure_ascii=False), 1 if errors else 0, scan_id))
-        # atualiza capacidade real do volume
+        # capacidade real do volume
+        used_now = 0
         try:
             u = shutil.disk_usage(mountpoint)
-            c.execute("UPDATE drives SET total_bytes=?, used_bytes=?, free_bytes=?, last_seen=?, updated_at=?, last_scan_id=? WHERE id=?",
-                      (u.total, u.used, u.free, now_iso(), now_iso(), scan_id, drive_id))
+            used_now = u.used
+            c.execute("UPDATE drives SET total_bytes=?, used_bytes=?, free_bytes=?, last_seen=?, updated_at=? WHERE id=?",
+                      (u.total, u.used, u.free, now_iso(), now_iso(), drive_id))
         except Exception:
-            c.execute("UPDATE drives SET last_seen=?, updated_at=?, last_scan_id=? WHERE id=?",
-                      (now_iso(), now_iso(), scan_id, drive_id))
-        c.commit()
-        scan_state[scan_id].update({"status": "completed", "files": files, "dirs": dirs, "bytes": total_b,
-                                    "errors": errors, "finished_at": now_iso()})
+            pass
+        # guarda: 0 arquivos e 0 pastas num VOLUME (não numa pasta comum) que
+        # informa mais de 1 GB usado não é um inventário válido — é uma leitura
+        # que falhou em silêncio. Não promove esse inventário vazio: o último
+        # inventário válido (se houver) continua valendo e o usuário é avisado
+        # para reler o drive. (Pasta comum vazia não entra aqui: o uso medido
+        # seria o do disco inteiro, não o da pasta.)
+        if files == 0 and dirs == 0 and used_now > 1024**3 and os.path.ismount(mountpoint):
+            c.execute("DELETE FROM entries WHERE scan_id=?", (scan_id,))
+            c.execute("UPDATE scans SET finished_at=?, status='failed', files_count=?, dirs_count=?, total_files_bytes=?, errors_json=?, warnings_json=?, incomplete=1, note=? WHERE id=?",
+                      (now_iso(), files, dirs, total_b, json.dumps(errors, ensure_ascii=False),
+                       json.dumps(warnings, ensure_ascii=False),
+                       "Nenhum arquivo ou pasta foi encontrado, embora o drive informe espaço usado. A leitura não foi registrada — clique em 'Reler este drive' para tentar de novo.", scan_id))
+            c.commit()
+            scan_state[scan_id].update({"status": "failed", "files": files, "dirs": dirs, "bytes": total_b,
+                                        "errors": errors, "warnings": warnings, "finished_at": now_iso()})
+        else:
+            # conclusão: só agora o novo inventário vira o atual
+            c.execute("UPDATE scans SET finished_at=?, status='completed', files_count=?, dirs_count=?, total_files_bytes=?, errors_json=?, warnings_json=?, incomplete=? WHERE id=?",
+                      (now_iso(), files, dirs, total_b, json.dumps(errors, ensure_ascii=False),
+                       json.dumps(warnings, ensure_ascii=False), 1 if (errors or warnings) else 0, scan_id))
+            c.execute("UPDATE drives SET last_scan_id=? WHERE id=?", (scan_id, drive_id))
+            c.commit()
+            scan_state[scan_id].update({"status": "completed", "files": files, "dirs": dirs, "bytes": total_b,
+                                        "errors": errors, "warnings": warnings, "finished_at": now_iso()})
     except InterruptedError:
         c.execute("UPDATE scans SET finished_at=?, status='interrupted', files_count=?, dirs_count=?, total_files_bytes=?, errors_json=?, warnings_json=?, incomplete=1, note='Interrompido pelo usuário — último inventário válido mantido.' WHERE id=?",
                   (now_iso(), files, dirs, total_b, json.dumps(errors, ensure_ascii=False),

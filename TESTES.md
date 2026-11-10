@@ -1,9 +1,16 @@
-# Testes executados — Painel de HDs (v1.0.0)
+# Testes executados — Painel de HDs (v1.0.0 + v1.0.1)
 
 Data: 10/11/2026. Ambiente: Ubuntu 24.04, Python 3.12 (só stdlib), porta 8765.
 Método: API + inventários reais de pastas de teste criadas para isso
 (`test-drives/`, removidas após os testes). O catálogo foi entregue **vazio**,
 para o usuário começar com os drives reais dele — sem inventar drives.
+
+## v1.0.1 — correção encontrada no teste real no Windows (10/11/2026)
+- **Sintoma:** no PC do usuário, o .exe abriu o painel e detectou o HD "Arquivos (4TB)" (E:\, NTFS, UUID) — mas a leitura terminou com **0 arquivos e 0 pastas**, num drive com 1,6 TB usados, e a interface dizia "Leitura concluída. Já pode ejetar".
+- **Causa:** o `_scan_worker` pulava todo item cujo `st_dev` diferisse do `st_dev` da raiz — check pensado para não atravessar para outro volume. No Windows o `st_dev` não distingue volumes de forma confiável e o check pulou **tudo**, em silêncio (só avisos, sem erros — por isso nada acusou).
+- **Correção:** check de dispositivo agora só vale em POSIX (Linux/macOS); no Windows fica desligado. Além disso, uma leitura que volta 0 arquivos e 0 pastas num **volume** (ponto de montagem) com mais de 1 GB usado não é mais registrada como concluída: fica como falha, com aviso, sem apagar o último inventário válido. Pasta comum vazia não entra no guarda (o uso medido seria o do disco inteiro).
+- **Interface:** avisos/erros da leitura agora aparecem no aviso de conclusão, e há um aviso próprio para leitura que falhou.
+- **Regressão (VM Linux, v1.0.1):** pasta com 4 arquivos/3 pastas → leitura completa, busca achou os arquivos; pasta vazia → concluída normalmente (guarda não disparou, como esperado); guarda simulada com 1,6 TB usados dispara para raiz de volume e não dispara para pasta comum; `node --check` em app.js OK; index/app.js 200. Catálogo de teste limpo depois (0 drives).
 
 ## Resultado geral: todos os fluxos principais passaram
 

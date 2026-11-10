@@ -105,8 +105,13 @@ async function pollScan(){
     if(sc.status==="running"&&live){
       $("#scan-progress").innerHTML=`<div class="notice"><b>📋 Leitura em andamento…</b> ${live.files||0} arquivos · ${live.dirs||0} pastas · ${fmt(live.bytes||0)}<br><span class="small mono">${esc(live.current_path||"")}</span><div class="progress" style="margin-top:8px"><i style="width:${Math.min(100,(live.files||0)%100)}%"></i></div><div class="row" style="margin-top:8px"><button class="btn sm danger" onclick="cancelScan()">■ Interromper leitura</button><span class="small">Interromper mantém o último inventário válido.</span></div></div>`;
     }else if(sc.status==="completed"){
-      $("#scan-progress").innerHTML=`<div class="notice"><b>✅ Leitura concluída.</b> ${sc.files_count} arquivos e ${sc.dirs_count} pastas catalogados. <b>Já pode ejetar o drive pelo sistema operacional.</b>${sc.incomplete?' <br>⚠ Leitura incompleta — alguns itens não puderam ser lidos (veja os erros no inventário).':""}</div>`;
+      const errs=(()=>{try{return JSON.parse(sc.errors_json||"[]")}catch(e){return[]}})();
+      const warns=(()=>{try{return JSON.parse(sc.warnings_json||"[]")}catch(e){return[]}})();
+      const detail=(errs.length||warns.length)?`<br><span class="small">${[...errs.slice(0,3),...warns.slice(0,3)].map(x=>esc(x)).join("<br>")}${(errs.length+warns.length)>6?`<br>…e mais ${errs.length+warns.length-6} item(ns).`:""}</span>`:"";
+      $("#scan-progress").innerHTML=`<div class="notice"><b>✅ Leitura concluída.</b> ${sc.files_count} arquivos e ${sc.dirs_count} pastas catalogados. <b>Já pode ejetar o drive pelo sistema operacional.</b>${sc.incomplete?' <br>⚠ Leitura incompleta — alguns itens não puderam ser lidos.':""}${sc.note?`<br>${esc(sc.note)}`:""}${detail}</div>`;
       if($("#scan-progress").dataset.done!=String(sc.id)){$("#scan-progress").dataset.done=sc.id;renderExplorer();}
+    }else if(sc.status==="failed"){
+      $("#scan-progress").innerHTML=`<div class="notice err"><b>❌ A leitura não foi registrada.</b>${sc.note?` ${esc(sc.note)}`:" Clique em <b>Reler este drive</b> para tentar de novo."}</div>`;
     }else if(sc.status==="interrupted"){
       $("#scan-progress").innerHTML=`<div class="notice warn"><b>⏸ Leitura interrompida.</b> O último inventário válido foi mantido. Reconecte o drive e clique em <b>Reler este drive</b>.</div>`;
     }}catch(e){}
