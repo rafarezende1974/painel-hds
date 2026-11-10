@@ -1,0 +1,39 @@
+# Workflow do GitHub Actions — build do .exe portátil do Painel de HDs (Windows)
+#
+# COMO INSTALAR ESTE ARQUIVO (o robô não consegue criar arquivos de workflow):
+# 1. No GitHub, dentro do repositório painel-hds, clique em "Add file" > "Create new file".
+# 2. No campo do nome, digite exatamente: .github/workflows/build-windows-exe.yml
+# 3. Cole todo o conteúdo deste arquivo e clique em "Commit changes".
+# 4. Depois, quando o código for enviado (push) para a branch main, a build roda
+#    sozinha. O .exe fica em Actions > Build Windows exe > Artifacts > PainelHDs-Windows.
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller==6.10.0
+
+      - name: Build exe
+        run: pyinstaller --onefile --name PainelHDs --add-data "static;static" --clean painel-hds.py
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: PainelHDs-Windows
+          path: dist/PainelHDs.exe
+          if-no-files-found: error
